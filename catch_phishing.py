@@ -9,6 +9,8 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
+import os
+import errno
 import re
 import certstream
 import tqdm
@@ -21,9 +23,19 @@ from suspicious import keywords, tlds
 
 from confusables import unconfuse
 
-log_suspicious = 'suspicious_domains.log'
-
 pbar = tqdm.tqdm(desc='certificate_update', unit='cert')
+
+import os
+import errno
+
+FIFO = 'phishing_catcher-pipe'
+CERTSTREAM_URL = 'wss://certstream.calidog.io'
+
+try:
+     os.mkfifo(FIFO)
+except OSError as oe:
+    if oe.errno != errno.EEXIST:
+        raise
 
 def score_domain(domain):
     """Score `domain`.
@@ -37,6 +49,12 @@ def score_domain(domain):
         int: the score of `domain`.
     """
     score = 0
+    unmodified_domain=domain
+    common_false_positives = ['composedb.com', 'compose.direct', 'platform.sh', 'bfd-online.de']
+    for cfp in common_false_positives:
+        if domain.endswith(cfp):
+            score -= 50
+
     for t in tlds:
         if domain.endswith(t):
             score += 20
@@ -64,12 +82,14 @@ def score_domain(domain):
     if domain.startswith('*.'):
         domain = domain[2:]
         # ie. detect fake .com (ie. *.com-account-management.info)
-        if words_in_domain[0] in ['com', 'net', 'org']:
+        if words_in_domain[0] in ['com', 'net', 'org', 'se', 'nu']:
+            print("Potentially fake domain, score + 10: {}".format(unmodified_domain))
             score += 10
 
     # Testing keywords
     for word in keywords.keys():
         if word in domain:
+            print("Keyword: {}, score: {}, domain: {}".format(word, keywords[word], unmodified_domain))
             score += keywords[word]
 
     # Testing Levenshtein distance for strong keywords (>= 70 points) (ie. paypol)
@@ -123,10 +143,9 @@ def callback(message, context):
                     "[+] Potential : "
                     "{} (score={})".format(colored(domain, attrs=['underline']), score))
 
-            if score >= 75:
-                with open(log_suspicious, 'a') as f:
-                    f.write("{}\n".format(domain))
-
+            if score >= 90:
+                with open(FIFO, 'w') as fifo:
+                    fifo.write("{}\n".format(domain))
 
 if __name__ == '__main__':
-    certstream.listen_for_events(callback)
+    certstream.listen_for_events(callback, url=CERTSTREAM_URL)
