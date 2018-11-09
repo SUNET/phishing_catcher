@@ -15,7 +15,8 @@ except OSError as oe:
 while True:
     with open(FIFO) as fifo:
         while True:
-            domain_to_find = fifo.read()
+            domain_fifo = fifo.read()
+            domain_to_find = domain_fifo.rstrip('\n')
             if len(domain_to_find) == 0:
                 break
             is_domain_known = False
